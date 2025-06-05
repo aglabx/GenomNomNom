@@ -1,0 +1,12 @@
+metric_type,codon,count
+start_codons,ATG,3847
+start_codons,GTG,152
+start_codons,TTG,24
+stop_codons,TAA,1834
+stop_codons,TAG,289
+stop_codons,TGA,1900
+orf_stats,total_orfs,4023
+orf_stats,mean_length,924.3
+orf_stats,median_length,678
+orf_stats,longest_orf,4932
+orf_stats,shortest_orf,96

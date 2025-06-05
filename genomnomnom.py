@@ -3,22 +3,19 @@
 🧬 GenomNomNom - A playful tool for munching through genomes
 
 This is the main entry point for the GenomNomNom toolkit.
-Currently implements mock functionality to demonstrate expected output.
+Phase 1: Real FASTA and GFF parsing implementation.
 """
 
 import argparse
 import sys
 from pathlib import Path
-import pandas as pd
 from typing import Dict, List, Tuple, Optional
+from Bio import SeqIO
+from Bio.SeqUtils import gc_fraction
+import re
+import csv
 
 # Mock data for demonstration
-MOCK_GENOME_STATS = {
-    'total_length': 4641652,
-    'gc_content': 50.8,
-    'num_contigs': 1
-}
-
 MOCK_CODON_COUNTS = {
     'start_codons': {
         'ATG': 3847,
@@ -45,21 +42,59 @@ class GenomeParser:
     
     def __init__(self, genome_file: str):
         self.genome_file = Path(genome_file)
-        self.sequence = ""
+        self.sequences = []
         self.stats = {}
     
     def parse(self) -> Dict:
-        """Parse genome FASTA file (MOCK implementation)"""
+        """Parse genome FASTA file using BioPython"""
         print(f"🔍 Parsing genome file: {self.genome_file}")
         
-        # Mock: Check if file exists
+        # Check if file exists
         if not self.genome_file.exists():
             raise FileNotFoundError(f"Genome file not found: {self.genome_file}")
         
-        # Mock: Return fake stats
-        print("✅ Genome parsed successfully")
-        self.stats = MOCK_GENOME_STATS
-        return self.stats
+        try:
+            # Parse FASTA file using BioPython
+            self.sequences = list(SeqIO.parse(str(self.genome_file), "fasta"))
+            
+            if not self.sequences:
+                raise ValueError(f"No sequences found in FASTA file: {self.genome_file}")
+            
+            # Calculate real statistics
+            self.stats = self._calculate_stats()
+            
+            print("✅ Genome parsed successfully")
+            print(f"   📊 Found {len(self.sequences)} sequence(s)")
+            print(f"   📏 Total length: {self.stats['total_length']:,} bp")
+            print(f"   🧬 GC content: {self.stats['gc_content']:.1f}%")
+            
+            return self.stats
+            
+        except Exception as e:
+            raise ValueError(f"Error parsing FASTA file: {e}")
+    
+    def _calculate_stats(self) -> Dict:
+        """Calculate genome statistics from parsed sequences"""
+        total_length = 0
+        total_gc_count = 0
+        
+        for seq_record in self.sequences:
+            seq_str = str(seq_record.seq).upper()
+            total_length += len(seq_str)
+            
+            # Count GC content
+            gc_count = seq_str.count('G') + seq_str.count('C')
+            total_gc_count += gc_count
+        
+        # Calculate GC percentage
+        gc_content = (total_gc_count / total_length) * 100 if total_length > 0 else 0
+        
+        return {
+            'total_length': total_length,
+            'gc_content': round(gc_content, 1),
+            'num_contigs': len(self.sequences),
+            'sequences': self.sequences  # Store for later use
+        }
 
 class AnnotationParser:
     """Handles parsing of GFF annotation files"""
@@ -67,20 +102,79 @@ class AnnotationParser:
     def __init__(self, annotation_file: str):
         self.annotation_file = Path(annotation_file)
         self.genes = []
+        self.cds_features = []
         self.stats = {}
     
     def parse(self) -> Dict:
-        """Parse GFF annotation file (MOCK implementation)"""
+        """Parse GFF annotation file"""
         print(f"🔍 Parsing annotation file: {self.annotation_file}")
         
-        # Mock: Check if file exists
+        # Check if file exists
         if not self.annotation_file.exists():
             raise FileNotFoundError(f"Annotation file not found: {self.annotation_file}")
         
-        # Mock: Return fake gene count
-        print("✅ Annotations parsed successfully")
-        self.stats = {'total_genes': 4023, 'coding_genes': 3847}
-        return self.stats
+        try:
+            # Simple GFF3 parser (basic implementation)
+            self._parse_gff3()
+            
+            # Calculate statistics
+            self.stats = self._calculate_stats()
+            
+            print("✅ Annotations parsed successfully")
+            print(f"   🧬 Found {self.stats['total_genes']} genes")
+            print(f"   💻 Found {self.stats['coding_genes']} coding sequences")
+            
+            return self.stats
+            
+        except Exception as e:
+            raise ValueError(f"Error parsing GFF file: {e}")
+    
+    def _parse_gff3(self):
+        """Parse GFF3 file format"""
+        with open(self.annotation_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                
+                # Skip comments and empty lines
+                if line.startswith('#') or not line:
+                    continue
+                
+                # Split GFF fields
+                fields = line.split('\t')
+                if len(fields) < 9:
+                    continue
+                
+                seqid, source, feature_type, start, end, score, strand, phase, attributes = fields
+                
+                # Store genes and CDS features
+                if feature_type.lower() == 'gene':
+                    self.genes.append({
+                        'seqid': seqid,
+                        'type': feature_type,
+                        'start': int(start),
+                        'end': int(end),
+                        'strand': strand,
+                        'attributes': attributes
+                    })
+                elif feature_type.lower() == 'cds':
+                    self.cds_features.append({
+                        'seqid': seqid,
+                        'type': feature_type,
+                        'start': int(start),
+                        'end': int(end),
+                        'strand': strand,
+                        'phase': phase,
+                        'attributes': attributes
+                    })
+    
+    def _calculate_stats(self) -> Dict:
+        """Calculate annotation statistics"""
+        return {
+            'total_genes': len(self.genes),
+            'coding_genes': len(self.cds_features),
+            'genes': self.genes,  # Store for later use
+            'cds_features': self.cds_features  # Store for later use
+        }
 
 class CodonAnalyzer:
     """Analyzes codon usage patterns"""
@@ -185,29 +279,31 @@ class ReportGenerator:
         return summary
     
     def save_csv(self, filename: str, codon_stats: Dict, orf_stats: Dict):
-        """Save results to CSV file"""
-        # Create a summary dataframe
-        data = []
-        
-        # Add codon counts
-        for codon_type in ['start_codons', 'stop_codons']:
-            for codon, count in codon_stats[codon_type].items():
-                data.append({
-                    'metric_type': codon_type,
-                    'codon': codon,
-                    'count': count
+        """Save results to CSV file using csv module"""
+        with open(filename, 'w', newline='') as csvfile:
+            fieldnames = ['metric_type', 'codon', 'count']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write header
+            writer.writeheader()
+            
+            # Add codon counts
+            for codon_type in ['start_codons', 'stop_codons']:
+                for codon, count in codon_stats[codon_type].items():
+                    writer.writerow({
+                        'metric_type': codon_type,
+                        'codon': codon,
+                        'count': count
+                    })
+            
+            # Add ORF stats
+            for metric, value in orf_stats.items():
+                writer.writerow({
+                    'metric_type': 'orf_stats',
+                    'codon': metric,
+                    'count': value
                 })
         
-        # Add ORF stats
-        for metric, value in orf_stats.items():
-            data.append({
-                'metric_type': 'orf_stats',
-                'codon': metric,
-                'count': value
-            })
-        
-        df = pd.DataFrame(data)
-        df.to_csv(filename, index=False)
         print(f"📄 Results saved to: {filename}")
 
 def main():
