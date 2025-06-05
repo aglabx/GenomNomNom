@@ -4,15 +4,20 @@
 
 ---
 
-## 🚀 Features (so far)
+## 🚀 Features (current mock version)
 
-- Parses a genome in FASTA format
-- Parses gene annotations (GFF or compatible formats)
-- Counts:
-  - Start codons
-  - Stop codons
-  - Open reading frames (ORFs)
-- Outputs basic statistics per genome
+- ✅ Parses a genome in FASTA format (file validation)
+- ✅ Parses gene annotations (GFF format validation)
+- ✅ Mock codon counting functionality:
+  - Start codons (ATG, GTG, TTG) with percentages
+  - Stop codons (TAA, TAG, TGA) with percentages
+- ✅ Mock ORF statistics (length distribution)
+- ✅ Beautiful console output with emojis
+- ✅ CSV export functionality
+- ✅ Command-line interface with help
+- ✅ Test data and automated testing
+
+**Note:** This is currently a mock implementation that demonstrates the expected interface and output format. The actual genome parsing and analysis will be implemented in future versions.
 
 ---
 
@@ -28,11 +33,45 @@ pip install -r requirements.txt
 
 ## 🧪 Usage
 
+### Basic usage:
 ```bash
 python genomnomnom.py --genome genome.fasta --annotation annotation.gff
 ```
 
-Outputs a summary table of codon statistics.
+### Save results to CSV:
+```bash
+python genomnomnom.py --genome genome.fasta --annotation annotation.gff --output results.csv
+```
+
+### With verbose output:
+```bash
+python genomnomnom.py --genome genome.fasta --annotation annotation.gff --verbose
+```
+
+### Using the Makefile:
+```bash
+# Install dependencies
+make install
+
+# Run demo with sample data
+make demo
+
+# Run tests
+make test
+
+# Clean temporary files
+make clean
+```
+
+### Quick test with sample data:
+```bash
+python genomnomnom.py --genome test_data/genome_sample.fasta --annotation test_data/annotation_sample.gff
+```
+
+Outputs a comprehensive analysis report including:
+- Genome statistics (length, GC content, contigs)
+- Start/stop codon usage with percentages  
+- ORF length distribution statistics
 
 ---
 

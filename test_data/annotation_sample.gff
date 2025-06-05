@@ -1,0 +1,11 @@
+##gff-version 3
+##sequence-region NC_000913.3 1 4641652
+NC_000913.3	RefSeq	region	1	4641652	.	+	.	ID=NC_000913.3:1..4641652;Dbxref=taxon:511145;Is_circular=true;Name=ANONYMOUS;gbkey=Src;genome=chromosome;mol_type=genomic DNA;strain=K-12;substrain=MG1655
+NC_000913.3	RefSeq	gene	190	255	.	+	.	ID=gene-b0001;Name=thrL;gbkey=Gene;gene=thrL;gene_biotype=protein_coding;locus_tag=b0001
+NC_000913.3	RefSeq	CDS	190	255	.	+	0	ID=cds-NP_414542.1;Parent=gene-b0001;Dbxref=UniProtKB/Swiss-Prot:P0AD86,Genbank:NP_414542.1;Name=NP_414542.1;gbkey=CDS;gene=thrL;product=thr operon leader peptide;protein_id=NP_414542.1;transl_table=11
+NC_000913.3	RefSeq	gene	337	2799	.	+	.	ID=gene-b0002;Name=thrA;gbkey=Gene;gene=thrA;gene_biotype=protein_coding;locus_tag=b0002
+NC_000913.3	RefSeq	CDS	337	2799	.	+	0	ID=cds-NP_414543.1;Parent=gene-b0002;Dbxref=UniProtKB/Swiss-Prot:P00561,Genbank:NP_414543.1;Name=NP_414543.1;gbkey=CDS;gene=thrA;product=bifunctional aspartokinase I/homoserine dehydrogenase I;protein_id=NP_414543.1;transl_table=11
+NC_000913.3	RefSeq	gene	2801	3733	.	+	.	ID=gene-b0003;Name=thrB;gbkey=Gene;gene=thrB;gene_biotype=protein_coding;locus_tag=b0003
+NC_000913.3	RefSeq	CDS	2801	3733	.	+	0	ID=cds-NP_414544.1;Parent=gene-b0003;Dbxref=UniProtKB/Swiss-Prot:P00547,Genbank:NP_414544.1;Name=NP_414544.1;gbkey=CDS;gene=thrB;product=homoserine kinase;protein_id=NP_414544.1;transl_table=11
+NC_000913.3	RefSeq	gene	3734	5020	.	+	.	ID=gene-b0004;Name=thrC;gbkey=Gene;gene=thrC;gene_biotype=protein_coding;locus_tag=b0004
+NC_000913.3	RefSeq	CDS	3734	5020	.	+	0	ID=cds-NP_414545.1;Parent=gene-b0004;Dbxref=UniProtKB/Swiss-Prot:P00934,Genbank:NP_414545.1;Name=NP_414545.1;gbkey=CDS;gene=thrC;product=L-threonine synthase;protein_id=NP_414545.1;transl_table=11
