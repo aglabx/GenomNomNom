@@ -102,18 +102,45 @@ class NCBISearcher:
             response.raise_for_status()
             summary_results = response.json()
             
+            # Debug: Print available fields for the first assembly
+            if assembly_ids and assembly_ids[0] in summary_results['result']:
+                first_assembly = summary_results['result'][assembly_ids[0]]
+                print("🔧 Debug - Available assembly fields:")
+                for key in sorted(first_assembly.keys()):
+                    value = first_assembly[key]
+                    print(f"   {key}: {value}")
+                print()
+            
             # Parse assembly information
             assemblies = []
             for assembly_id in assembly_ids:
                 if assembly_id in summary_results['result']:
                     assembly_info = summary_results['result'][assembly_id]
+                    
+                    # Try different field names for assembly level
+                    level = (assembly_info.get('assemblylevel') or 
+                            assembly_info.get('assembly_level') or 
+                            assembly_info.get('level') or
+                            assembly_info.get('assemblytype') or
+                            assembly_info.get('assemblyclass') or
+                            assembly_info.get('assemblyDescription', 'N/A'))
+                    
+                    # Try different field names for genome size
+                    size = (assembly_info.get('totalsize') or 
+                           assembly_info.get('total_length') or 
+                           assembly_info.get('genome_size') or 
+                           assembly_info.get('totallength') or
+                           assembly_info.get('assemblysize') or
+                           assembly_info.get('stat_total_sequence_length') or
+                           0)
+                    
                     assemblies.append({
                         'id': assembly_id,
                         'accession': assembly_info.get('assemblyaccession', 'N/A'),
                         'name': assembly_info.get('assemblyname', 'N/A'),
                         'organism': assembly_info.get('organism', 'N/A'),
-                        'level': assembly_info.get('assemblylevel', 'N/A'),
-                        'size': assembly_info.get('totalsize', 0),
+                        'level': level,
+                        'size': size,
                         'submission_date': assembly_info.get('submissiondate', 'N/A'),
                         'ftp_path': assembly_info.get('ftppath_refseq', assembly_info.get('ftppath_genbank', ''))
                     })
@@ -480,6 +507,65 @@ class CodonAnalyzer:
         
         return results
 
+    def analyze_all_codons(self) -> None:
+        """Analyze all 64 codons from CDS sequences"""
+        print("🔬 Analyzing all 64 codons...")
+        
+        # Initialize counts for all possible codons
+        all_codons = []
+        bases = ['A', 'T', 'G', 'C']
+        for base1 in bases:
+            for base2 in bases:
+                for base3 in bases:
+                    all_codons.append(base1 + base2 + base3)
+        
+        self.all_codon_counts = {codon: 0 for codon in all_codons}
+        
+        # Get CDS features from annotation
+        cds_features = self.annotation_parser.stats.get('cds_features', [])
+        
+        if not cds_features:
+            print("⚠️  No CDS features found for all-codon analysis")
+            return
+        
+        # Get genome sequences
+        sequences = {}
+        for seq_record in self.genome_parser.sequences:
+            sequences[seq_record.id] = str(seq_record.seq).upper()
+        
+        total_codons_found = 0
+        cds_analyzed = 0
+        
+        for cds in cds_features:
+            seqid = cds['seqid']
+            start = cds['start'] - 1  # Convert to 0-based indexing
+            end = cds['end']
+            strand = cds['strand']
+            
+            if seqid not in sequences:
+                continue
+            
+            # Extract CDS sequence
+            cds_seq = sequences[seqid][start:end]
+            
+            # Handle reverse strand
+            if strand == '-':
+                cds_seq = self._reverse_complement(cds_seq)
+            
+            # Count all codons in this CDS (in triplets)
+            for i in range(0, len(cds_seq) - 2, 3):
+                codon = cds_seq[i:i+3]
+                if len(codon) == 3 and all(base in 'ATGC' for base in codon):
+                    if codon in self.all_codon_counts:
+                        self.all_codon_counts[codon] += 1
+                        total_codons_found += 1
+            
+            cds_analyzed += 1
+        
+        print(f"   📊 Analyzed {cds_analyzed} CDS sequences")
+        print(f"   📊 Found {total_codons_found:,} total codons")
+        print("✅ All-codon analysis complete")
+
     def generate_codon_table_report(self) -> str:
         """Generate a beautiful codon usage table report"""
         if not self.all_codon_counts:
@@ -652,28 +738,180 @@ class CodonAnalyzer:
         
         return report
     
-    def analyze_all_codons(self) -> Dict:
-        """Analyze usage of all 64 codons based on real CDS sequences"""
-        print("🔬 Analyzing comprehensive codon usage...")
+    def generate_classic_codon_table(self) -> str:
+        """Generate a classic textbook-style square codon usage table with color visualization"""
+        if not self.all_codon_counts:
+            self.analyze_all_codons()
         
-        # Initialize codon counts for all 64 codons
-        all_codon_counts = {codon: 0 for codon in GENETIC_CODE.keys()}
+        total_codons = sum(self.all_codon_counts.values())
+        if total_codons == 0:
+            return "⚠️ No codon data available for classic table generation"
+        
+        # Calculate percentages for each codon
+        codon_percentages = {}
+        for codon, count in self.all_codon_counts.items():
+            codon_percentages[codon] = (count / total_codons) * 100 if total_codons > 0 else 0
+        
+        # Color function for percentages with more contrast
+        def colorize_percentage(percentage):
+            """Apply color based on percentage value with high contrast"""
+            if percentage >= 2.5:
+                return f"\033[1;92m{percentage:4.1f}\033[0m"  # Bold bright green for high usage
+            elif percentage >= 1.5:
+                return f"\033[1;93m{percentage:4.1f}\033[0m"  # Bold bright yellow for medium usage
+            elif percentage >= 0.5:
+                return f"\033[1;96m{percentage:4.1f}\033[0m"  # Bold bright cyan for low usage
+            elif percentage > 0:
+                return f"\033[1;97m{percentage:4.1f}\033[0m"  # Bold bright white for very low usage
+            else:
+                return f"\033[1;90m{percentage:4.1f}\033[0m"  # Bold dark gray for zero usage
+        
+        bases = ['T', 'C', 'A', 'G']  # Using T instead of U for DNA
+        
+        report = "\n" + "🧬" * 30 + "\n"
+        report += "📚 CLASSIC CODON USAGE TABLE (Textbook Style)\n"
+        report += "🧬" * 30 + "\n"
+        report += f"🔢 Total codons analyzed: \033[96m{total_codons:,}\033[0m\n"
+        report += "═" * 78 + "\n\n"
+        
+        # Enhanced header with proper spacing to match data rows
+        report += "       ┃"
+        for second_base in bases:
+            report += f"        \033[1;94m{second_base}\033[0m        ┃"
+        report += "\n"
+        
+        report += "  \033[1;94m1st\033[0m  ┃"
+        for _ in bases:
+            report += "  \033[1;94m2nd position\033[0m        ┃"
+        report += "\n"
+        
+        report += " \033[1;94mpos.\033[0m  ┃"
+        for _ in bases:
+            report += "  \033[1;94mT     C     A     G\033[0m  ┃"
+        report += "\n"
+        
+        # Thicker separator matching the data width
+        report += "━━━━━━━╋"
+        for _ in bases:
+            report += "━━━━━━━━━━━━━━━━━━━━━━━╋"
+        report += "\n"
+        
+        # Data rows with enhanced formatting
+        for first_base in bases:
+            # Row with colored percentages
+            report += f"   \033[1;94m{first_base}\033[0m   ┃"
+            
+            for second_base in bases:
+                cell_data = ""
+                for third_base in bases:
+                    codon = first_base + second_base + third_base
+                    percentage = codon_percentages.get(codon, 0)
+                    cell_data += f"  {colorize_percentage(percentage)}"
+                report += cell_data + " ┃"
+            report += "\n"
+            
+            # Row with amino acids
+            report += "       ┃"
+            for second_base in bases:
+                cell_data = ""
+                for third_base in bases:
+                    codon = first_base + second_base + third_base
+                    aa = GENETIC_CODE.get(codon, '?')
+                    if aa == '*':
+                        aa_colored = f"\033[1;91mSTP\033[0m"  # Bold red for stop codons
+                    else:
+                        aa_colored = f"\033[1;37m{aa:>3}\033[0m"  # Bold white for amino acids
+                    cell_data += f"  {aa_colored:5}"
+                report += cell_data + " ┃"
+            report += "\n"
+            
+            # Separator line between rows
+            if first_base != bases[-1]:
+                report += "       ┃"
+                for _ in bases:
+                    report += "                       ┃"
+                report += "\n"
+            else:
+                # Final separator
+                report += "━━━━━━━╋"
+                for _ in bases:
+                    report += "━━━━━━━━━━━━━━━━━━━━━━━╋"
+                report += "\n"
+        
+        # Enhanced legend with more contrasting colors
+        report += "\n🎨 \033[1;94mCOLOR LEGEND:\033[0m\n"
+        report += "━" * 40 + "\n"
+        report += f"• \033[1;92m■\033[0m High usage (≥2.5%)\n"
+        report += f"• \033[1;93m■\033[0m Medium usage (1.5-2.4%)\n"
+        report += f"• \033[1;96m■\033[0m Low usage (0.5-1.4%)\n"
+        report += f"• \033[1;97m■\033[0m Very low usage (<0.5%)\n"
+        report += f"• \033[1;90m■\033[0m Unused (0%)\n"
+        report += f"• \033[1;91mSTP\033[0m Stop codons\n\n"
+        
+        report += "📋 \033[1;94mTABLE ORGANIZATION:\033[0m\n"
+        report += "━" * 40 + "\n"
+        report += "• Rows: 1st nucleotide position (T, C, A, G)\n"
+        report += "• Columns: 2nd nucleotide position (T, C, A, G)\n"
+        report += "• Within cells: 3rd position from left to right (T, C, A, G)\n"
+        report += "• Numbers show percentage of total codon usage\n"
+        report += "• Letters show corresponding amino acid codes\n"
+        
+        # Enhanced statistics
+        sorted_codons = sorted(codon_percentages.items(), key=lambda x: x[1], reverse=True)
+        most_used = sorted_codons[0] if sorted_codons else ('---', 0)
+        used_codons = [c for c in sorted_codons if c[1] > 0]
+        least_used = used_codons[-1] if used_codons else ('---', 0)
+        unused_count = sum(1 for _, pct in sorted_codons if pct == 0)
+        
+        report += f"\n📊 \033[94mUSAGE STATISTICS:\033[0m\n"
+        report += "━" * 40 + "\n"
+        report += f"• Most used codon: \033[92m{most_used[0]}\033[0m (\033[92m{most_used[1]:.2f}%\033[0m)\n"
+        if used_codons:
+            report += f"• Least used codon: \033[37m{least_used[0]}\033[0m (\033[37m{least_used[1]:.2f}%\033[0m)\n"
+        report += f"• Used codons: \033[96m{len(used_codons)}/64\033[0m\n"
+        report += f"• Unused codons: \033[90m{unused_count}/64\033[0m\n"
+        
+        # Calculate codon usage evenness
+        if used_codons:
+            used_percentages = [pct for _, pct in used_codons]
+            evenness = min(used_percentages) / max(used_percentages) if max(used_percentages) > 0 else 0
+            if evenness >= 0.5:
+                evenness_color = "\033[92m"  # Green
+            elif evenness >= 0.2:
+                evenness_color = "\033[93m"  # Yellow
+            else:
+                evenness_color = "\033[91m"  # Red
+            report += f"• Usage evenness: {evenness_color}{evenness:.3f}\033[0m (1.0 = perfectly even)\n"
+        
+        return report
+
+    def analyze_all_codons(self) -> None:
+        """Analyze all 64 codons from CDS sequences"""
+        print("🔬 Analyzing all 64 codons...")
+        
+        # Initialize counts for all possible codons
+        all_codons = []
+        bases = ['A', 'T', 'G', 'C']
+        for base1 in bases:
+            for base2 in bases:
+                for base3 in bases:
+                    all_codons.append(base1 + base2 + base3)
+        
+        self.all_codon_counts = {codon: 0 for codon in all_codons}
         
         # Get CDS features from annotation
         cds_features = self.annotation_parser.stats.get('cds_features', [])
         
         if not cds_features:
-            print("⚠️  No CDS features found in annotation file")
-            print("❌ Cannot perform comprehensive codon analysis without CDS annotations")
-            self.all_codon_counts = all_codon_counts
-            return all_codon_counts
+            print("⚠️  No CDS features found for all-codon analysis")
+            return
         
-        # Get genome sequences (as dictionary for quick lookup)
+        # Get genome sequences
         sequences = {}
         for seq_record in self.genome_parser.sequences:
             sequences[seq_record.id] = str(seq_record.seq).upper()
         
-        total_codons = 0
+        total_codons_found = 0
         cds_analyzed = 0
         
         for cds in cds_features:
@@ -692,33 +930,27 @@ class CodonAnalyzer:
             if strand == '-':
                 cds_seq = self._reverse_complement(cds_seq)
             
-            # Skip if sequence is too short or not divisible by 3
-            if len(cds_seq) < 3 or len(cds_seq) % 3 != 0:
-                continue
-            
-            # Count all codons in this CDS
+            # Count all codons in this CDS (in triplets)
             for i in range(0, len(cds_seq) - 2, 3):
                 codon = cds_seq[i:i+3]
-                if codon in all_codon_counts:
-                    all_codon_counts[codon] += 1
-                    total_codons += 1
+                if len(codon) == 3 and all(base in 'ATGC' for base in codon):
+                    if codon in self.all_codon_counts:
+                        self.all_codon_counts[codon] += 1
+                        total_codons_found += 1
             
             cds_analyzed += 1
         
-        self.all_codon_counts = all_codon_counts
-        
         print(f"   📊 Analyzed {cds_analyzed} CDS sequences")
-        print(f"   🔢 Total codons counted: {total_codons:,}")
-        print("✅ Comprehensive codon analysis complete")
-        return all_codon_counts
+        print(f"   📊 Found {total_codons_found:,} total codons")
+        print("✅ All-codon analysis complete")
 
-class ORFAnalyzer:
-    """Analyzes Open Reading Frames"""
+class ExonAnalyzer:
+    """Analyzes Coding Sequence Exons - CDS regions from gene annotations"""
     
     def __init__(self, genome_parser: GenomeParser, annotation_parser: AnnotationParser):
         self.genome_parser = genome_parser
         self.annotation_parser = annotation_parser
-        self.orf_stats = {}
+        self.exon_stats = {}
     
     def _extract_gene_info(self, attributes: str) -> Dict[str, str]:
         """Extract gene name and product from GFF attributes"""
@@ -753,32 +985,32 @@ class ORFAnalyzer:
         
         return info
 
-    def analyze_orfs(self) -> Dict:
-        """Analyze ORF statistics based on real CDS sequences"""
-        print("🔬 Analyzing ORFs...")
+    def analyze_exons(self) -> Dict:
+        """Analyze Exon (CDS) statistics based on real CDS sequences"""
+        print("🔬 Analyzing Exons (Coding Sequence regions)...")
         
         # Get CDS features from annotation
         cds_features = self.annotation_parser.stats.get('cds_features', [])
         
         if not cds_features:
             print("⚠️  No CDS features found in annotation file")
-            print("❌ Cannot perform ORF analysis without CDS annotations")
+            print("❌ Cannot perform Exon analysis without CDS annotations")
             # Return empty stats instead of mock data
-            self.orf_stats = {
-                'total_orfs': 0,
+            self.exon_stats = {
+                'total_exons': 0,
                 'mean_length': 0,
                 'median_length': 0,
-                'longest_orf': 0,
-                'shortest_orf': 0
+                'longest_exon': 0,
+                'shortest_exon': 0
             }
-            return self.orf_stats
+            return self.exon_stats
         
-        # Calculate ORF lengths from CDS features and track longest/shortest
-        orf_data = []
+        # Calculate Exon lengths from CDS features and track longest/shortest
+        exon_data = []
         for cds in cds_features:
             length = cds['end'] - cds['start'] + 1
             gene_info = self._extract_gene_info(cds.get('attributes', ''))
-            orf_data.append({
+            exon_data.append({
                 'length': length,
                 'gene': gene_info['gene'],
                 'product': gene_info['product'],
@@ -786,41 +1018,41 @@ class ORFAnalyzer:
                 'end': cds['end']
             })
         
-        if not orf_data:
-            print("⚠️  No valid ORF lengths found")
-            print("❌ Cannot calculate ORF statistics")
+        if not exon_data:
+            print("⚠️  No valid Exon lengths found")
+            print("❌ Cannot calculate Exon statistics")
             # Return empty stats instead of mock data
-            self.orf_stats = {
-                'total_orfs': 0,
+            self.exon_stats = {
+                'total_exons': 0,
                 'mean_length': 0,
                 'median_length': 0,
-                'longest_orf': 0,
-                'shortest_orf': 0
+                'longest_exon': 0,
+                'shortest_exon': 0
             }
-            return self.orf_stats
+            return self.exon_stats
         
-        # Find longest and shortest ORFs
-        longest_orf = max(orf_data, key=lambda x: x['length'])
-        shortest_orf = min(orf_data, key=lambda x: x['length'])
+        # Find longest and shortest Exons
+        longest_exon = max(exon_data, key=lambda x: x['length'])
+        shortest_exon = min(exon_data, key=lambda x: x['length'])
         
         # Calculate statistics
         import statistics
-        orf_lengths = [orf['length'] for orf in orf_data]
+        exon_lengths = [exon['length'] for exon in exon_data]
         
-        self.orf_stats = {
-            'total_orfs': len(orf_lengths),
-            'mean_length': round(statistics.mean(orf_lengths), 1),
-            'median_length': statistics.median(orf_lengths),
-            'longest_orf': max(orf_lengths),
-            'shortest_orf': min(orf_lengths),
-            'longest_orf_info': longest_orf,
-            'shortest_orf_info': shortest_orf
+        self.exon_stats = {
+            'total_exons': len(exon_lengths),
+            'mean_length': round(statistics.mean(exon_lengths), 1),
+            'median_length': statistics.median(exon_lengths),
+            'longest_exon': max(exon_lengths),
+            'shortest_exon': min(exon_lengths),
+            'longest_exon_info': longest_exon,
+            'shortest_exon_info': shortest_exon
         }
         
-        print(f"   � Analyzed {len(orf_lengths)} ORFs")
-        print(f"   📏 Length range: {min(orf_lengths)} - {max(orf_lengths)} bp")
-        print("✅ ORF analysis complete")
-        return self.orf_stats
+        print(f"   🧬 Analyzed {len(exon_lengths)} Exons")
+        print(f"   📏 Length range: {min(exon_lengths)} - {max(exon_lengths)} bp")
+        print("✅ Exon analysis complete")
+        return self.exon_stats
     
     def find_orfs_in_sequence(self, sequence: str, min_length: int = 100) -> List[Dict]:
         """Find ORFs in a DNA sequence (alternative method for annotation-free analysis)"""
@@ -866,7 +1098,7 @@ class ReportGenerator:
     def __init__(self):
         self.results = {}
     
-    def generate_summary(self, genome_stats: Dict, codon_stats: Dict, orf_stats: Dict) -> str:
+    def generate_summary(self, genome_stats: Dict, codon_stats: Dict, exon_stats: Dict) -> str:
         """Generate summary report"""
         
         codon_analyzer = CodonAnalyzer(None, None)
@@ -892,33 +1124,33 @@ class ReportGenerator:
 - TAG: {codon_stats['stop_codons']['TAG']:,} ({percentages['stop_percentages']['TAG']:.1f}%)
 - TGA: {codon_stats['stop_codons']['TGA']:,} ({percentages['stop_percentages']['TGA']:.1f}%)
 
-📏 ORF Statistics:
-- Total ORFs: {orf_stats['total_orfs']:,}
-- Mean length: {orf_stats['mean_length']:.1f} bp
-- Median length: {orf_stats['median_length']} bp"""
+📏 Exon Statistics:
+- Total Exons: {exon_stats['total_exons']:,}
+- Mean length: {exon_stats['mean_length']:.1f} bp
+- Median length: {exon_stats['median_length']} bp"""
         
-        # Add detailed info for longest and shortest ORFs if available
-        if 'longest_orf_info' in orf_stats and orf_stats['longest_orf_info']:
-            longest_info = orf_stats['longest_orf_info']
+        # Add detailed info for longest and shortest Exons if available
+        if 'longest_exon_info' in exon_stats and exon_stats['longest_exon_info']:
+            longest_info = exon_stats['longest_exon_info']
             gene_name = longest_info.get('gene', 'Unknown')
             product = longest_info.get('product', 'Unknown')
-            summary += f"\n- Longest ORF: {orf_stats['longest_orf']:,} bp"
+            summary += f"\n- Longest Exon: {exon_stats['longest_exon']:,} bp"
             summary += f"\n  📍 Gene: {gene_name}"
             if product != 'Unknown' and product != gene_name:
                 summary += f"\n  🔬 Product: {product}"
         else:
-            summary += f"\n- Longest ORF: {orf_stats['longest_orf']:,} bp"
+            summary += f"\n- Longest Exon: {exon_stats['longest_exon']:,} bp"
         
-        if 'shortest_orf_info' in orf_stats and orf_stats['shortest_orf_info']:
-            shortest_info = orf_stats['shortest_orf_info']
+        if 'shortest_exon_info' in exon_stats and exon_stats['shortest_exon_info']:
+            shortest_info = exon_stats['shortest_exon_info']
             gene_name = shortest_info.get('gene', 'Unknown')
             product = shortest_info.get('product', 'Unknown')
-            summary += f"\n- Shortest ORF: {orf_stats['shortest_orf']} bp"
+            summary += f"\n- Shortest Exon: {exon_stats['shortest_exon']} bp"
             summary += f"\n  📍 Gene: {gene_name}"
             if product != 'Unknown' and product != gene_name:
                 summary += f"\n  🔬 Product: {product}"
         else:
-            summary += f"\n- Shortest ORF: {orf_stats['shortest_orf']} bp"
+            summary += f"\n- Shortest Exon: {exon_stats['shortest_exon']} bp"
         
         summary += f"""
 
@@ -926,7 +1158,7 @@ class ReportGenerator:
 """
         return summary
     
-    def save_csv(self, filename: str, codon_stats: Dict, orf_stats: Dict):
+    def save_csv(self, filename: str, codon_stats: Dict, exon_stats: Dict):
         """Save results to CSV file using csv module"""
         with open(filename, 'w', newline='') as csvfile:
             fieldnames = ['metric_type', 'codon', 'count']
@@ -944,10 +1176,10 @@ class ReportGenerator:
                         'count': count
                     })
             
-            # Add ORF stats
-            for metric, value in orf_stats.items():
+            # Add Exon stats
+            for metric, value in exon_stats.items():
                 writer.writerow({
-                    'metric_type': 'orf_stats',
+                    'metric_type': 'exon_stats',
                     'codon': metric,
                     'count': value
                 })
@@ -1063,13 +1295,13 @@ Examples:
         codon_analyzer = CodonAnalyzer(genome_parser, annotation_parser)
         codon_stats = codon_analyzer.count_codons()
         
-        # Analyze ORFs
-        orf_analyzer = ORFAnalyzer(genome_parser, annotation_parser)
-        orf_stats = orf_analyzer.analyze_orfs()
+        # Analyze Exons
+        exon_analyzer = ExonAnalyzer(genome_parser, annotation_parser)
+        exon_stats = exon_analyzer.analyze_exons()
         
         # Generate report
         report_generator = ReportGenerator()
-        summary = report_generator.generate_summary(genome_stats, codon_stats, orf_stats)
+        summary = report_generator.generate_summary(genome_stats, codon_stats, exon_stats)
         
         print(summary)
         
@@ -1077,10 +1309,14 @@ Examples:
         if args.detailed_codons:
             codon_table = codon_analyzer.generate_codon_table_report()
             print(codon_table)
+            
+            # Also show classic square table
+            classic_table = codon_analyzer.generate_classic_codon_table()
+            print(classic_table)
         
         # Save CSV if requested
         if args.output:
-            report_generator.save_csv(args.output, codon_stats, orf_stats)
+            report_generator.save_csv(args.output, codon_stats, exon_stats)
         
         print("🎉 GenomNomNom finished successfully!")
         
