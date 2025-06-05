@@ -25,6 +25,35 @@ import shutil
 
 # Note: Mock data removed - now using real analysis only
 
+# Genetic code table (Standard genetic code)
+GENETIC_CODE = {
+    'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L',
+    'TCT': 'S', 'TCC': 'S', 'TCA': 'S', 'TCG': 'S',
+    'TAT': 'Y', 'TAC': 'Y', 'TAA': '*', 'TAG': '*',
+    'TGT': 'C', 'TGC': 'C', 'TGA': '*', 'TGG': 'W',
+    'CTT': 'L', 'CTC': 'L', 'CTA': 'L', 'CTG': 'L',
+    'CCT': 'P', 'CCC': 'P', 'CCA': 'P', 'CCG': 'P',
+    'CAT': 'H', 'CAC': 'H', 'CAA': 'Q', 'CAG': 'Q',
+    'CGT': 'R', 'CGC': 'R', 'CGA': 'R', 'CGG': 'R',
+    'ATT': 'I', 'ATC': 'I', 'ATA': 'I', 'ATG': 'M',
+    'ACT': 'T', 'ACC': 'T', 'ACA': 'T', 'ACG': 'T',
+    'AAT': 'N', 'AAC': 'N', 'AAA': 'K', 'AAG': 'K',
+    'AGT': 'S', 'AGC': 'S', 'AGA': 'R', 'AGG': 'R',
+    'GTT': 'V', 'GTC': 'V', 'GTA': 'V', 'GTG': 'V',
+    'GCT': 'A', 'GCC': 'A', 'GCA': 'A', 'GCG': 'A',
+    'GAT': 'D', 'GAC': 'D', 'GAA': 'E', 'GAG': 'E',
+    'GGT': 'G', 'GGC': 'G', 'GGA': 'G', 'GGG': 'G'
+}
+
+# Amino acid names
+AMINO_ACID_NAMES = {
+    'A': 'Ala', 'R': 'Arg', 'N': 'Asn', 'D': 'Asp', 'C': 'Cys',
+    'Q': 'Gln', 'E': 'Glu', 'G': 'Gly', 'H': 'His', 'I': 'Ile',
+    'L': 'Leu', 'K': 'Lys', 'M': 'Met', 'F': 'Phe', 'P': 'Pro',
+    'S': 'Ser', 'T': 'Thr', 'W': 'Trp', 'Y': 'Tyr', 'V': 'Val',
+    '*': 'Stop'
+}
+
 class NCBISearcher:
     """Handles searching and downloading genomes from NCBI"""
     
@@ -345,6 +374,7 @@ class CodonAnalyzer:
         self.genome_parser = genome_parser
         self.annotation_parser = annotation_parser
         self.codon_counts = {}
+        self.all_codon_counts = {}
         self.start_codons = ['ATG', 'GTG', 'TTG']
         self.stop_codons = ['TAA', 'TAG', 'TGA']
     
@@ -450,6 +480,238 @@ class CodonAnalyzer:
         
         return results
 
+    def generate_codon_table_report(self) -> str:
+        """Generate a beautiful codon usage table report"""
+        if not self.all_codon_counts:
+            self.analyze_all_codons()
+        
+        total_codons = sum(self.all_codon_counts.values())
+        if total_codons == 0:
+            return "⚠️ No codon data available for table generation"
+        
+        # Group codons by amino acid
+        aa_groups = {}
+        for codon, aa in GENETIC_CODE.items():
+            if aa not in aa_groups:
+                aa_groups[aa] = []
+            aa_groups[aa].append(codon)
+        
+        # Calculate frequencies and identify unusual patterns
+        codon_frequencies = {}
+        aa_frequencies = {}
+        unusual_codons = []
+        rare_codons = []
+        dominant_codons = []
+        
+        for codon, count in self.all_codon_counts.items():
+            freq = (count / total_codons) * 100 if total_codons > 0 else 0
+            codon_frequencies[codon] = freq
+            
+            aa = GENETIC_CODE[codon]
+            if aa not in aa_frequencies:
+                aa_frequencies[aa] = 0
+            aa_frequencies[aa] += freq
+        
+        # Identify unusual codon usage patterns
+        for aa, codons in aa_groups.items():
+            if len(codons) > 1:  # Amino acids with multiple codons
+                aa_total = sum(codon_frequencies[c] for c in codons)
+                if aa_total > 0:
+                    for codon in codons:
+                        relative_usage = (codon_frequencies[codon] / aa_total) * 100
+                        # Flag as unusual patterns
+                        if relative_usage < 3 and codon_frequencies[codon] > 0.05:
+                            rare_codons.append((codon, aa, relative_usage, codon_frequencies[codon]))
+                        elif relative_usage > 85:
+                            dominant_codons.append((codon, aa, relative_usage, codon_frequencies[codon]))
+                        elif (relative_usage < 5 and codon_frequencies[codon] > 0.1) or relative_usage > 80:
+                            unusual_codons.append((codon, aa, relative_usage, codon_frequencies[codon]))
+        
+        # Build the report
+        report = "\n" + "🧬" * 20 + " CODON USAGE ANALYSIS " + "🧬" * 20 + "\n"
+        report += "=" * 80 + "\n"
+        
+        # Sort amino acids by frequency (excluding stop codons for main table)
+        sorted_aas = sorted([(aa, freq) for aa, freq in aa_frequencies.items() if aa != '*'], 
+                           key=lambda x: x[1], reverse=True)
+        
+        report += "\n📊 CODON USAGE BY AMINO ACID (sorted by frequency)\n"
+        report += "─" * 80 + "\n"
+        
+        for i, (aa, aa_freq) in enumerate(sorted_aas):
+            aa_name = AMINO_ACID_NAMES.get(aa, aa)
+            
+            # Add ranking emojis
+            rank_emoji = ""
+            if i == 0:
+                rank_emoji = "🥇 "
+            elif i == 1:
+                rank_emoji = "🥈 "
+            elif i == 2:
+                rank_emoji = "🥉 "
+            
+            # Color coding based on frequency
+            freq_emoji = ""
+            if aa_freq > 7:
+                freq_emoji = "🔴"  # Very high
+            elif aa_freq > 5:
+                freq_emoji = "🟠"  # High
+            elif aa_freq > 3:
+                freq_emoji = "🟡"  # Medium
+            elif aa_freq > 1:
+                freq_emoji = "🟢"  # Low
+            else:
+                freq_emoji = "🔵"  # Very low
+                
+            report += f"\n{rank_emoji}{freq_emoji} {aa_name} ({aa}) — {aa_freq:.2f}% of all codons\n"
+            
+            # Get codons for this amino acid, sorted by frequency
+            aa_codons = [(c, codon_frequencies[c]) for c in aa_groups[aa]]
+            aa_codons.sort(key=lambda x: x[1], reverse=True)
+            
+            # Create a nice table for codons
+            report += "   ┌" + "─" * 70 + "┐\n"
+            
+            for j, (codon, freq) in enumerate(aa_codons):
+                count = self.all_codon_counts[codon]
+                # Calculate relative usage within this amino acid
+                relative = (freq / aa_freq) * 100 if aa_freq > 0 else 0
+                
+                # Add visual indicators
+                indicators = ""
+                if freq > 4.0:  # Very high usage
+                    indicators += "🔥"
+                if freq < 0.05:  # Very low usage
+                    indicators += "💤"
+                if relative > 85:  # Extremely dominant codon for this AA
+                    indicators += "�"
+                elif relative > 70:  # Dominant codon for this AA
+                    indicators += "⭐"
+                if relative < 3 and freq > 0.05:  # Rare but present
+                    indicators += "🔸"
+                
+                # Create progress bar for relative usage
+                bar_length = 20
+                filled = int((relative / 100) * bar_length)
+                bar = "█" * filled + "░" * (bar_length - filled)
+                
+                report += f"   │ {codon}: {count:>6,} ({freq:>5.2f}% total, {relative:>5.1f}% of {aa}) [{bar}] {indicators}\n"
+            
+            report += "   └" + "─" * 70 + "┘\n"
+        
+        # Stop codons section with special formatting
+        report += f"\n🛑 STOP CODONS — End of Translation\n"
+        report += "─" * 40 + "\n"
+        stop_codons = [(c, codon_frequencies[c]) for c in aa_groups['*']]
+        stop_codons.sort(key=lambda x: x[1], reverse=True)
+        
+        report += "┌" + "─" * 38 + "┐\n"
+        for codon, freq in stop_codons:
+            count = self.all_codon_counts[codon]
+            stop_emoji = "🔴" if freq > 1.5 else "🟡" if freq > 0.5 else "🟢"
+            report += f"│ {stop_emoji} {codon}: {count:>6,} ({freq:>5.2f}% of all codons) │\n"
+        report += "└" + "─" * 38 + "┘\n"
+        
+        # Enhanced unusual patterns section
+        all_unusual = rare_codons + dominant_codons + unusual_codons
+        if all_unusual:
+            report += "\n⚠️  UNUSUAL CODON USAGE PATTERNS\n"
+            report += "─" * 50 + "\n"
+            
+            if dominant_codons:
+                report += "👑 DOMINANT CODONS (>85% usage for their amino acid):\n"
+                for codon, aa, relative_usage, total_freq in sorted(dominant_codons, key=lambda x: x[2], reverse=True):
+                    aa_name = AMINO_ACID_NAMES.get(aa, aa)
+                    report += f"   {codon} ({aa_name}): {relative_usage:.1f}% dominance, {total_freq:.2f}% total\n"
+                report += "\n"
+            
+            if rare_codons:
+                report += "🔸 RARE CODONS (<3% usage for their amino acid):\n"
+                for codon, aa, relative_usage, total_freq in sorted(rare_codons, key=lambda x: x[3], reverse=True):
+                    aa_name = AMINO_ACID_NAMES.get(aa, aa)
+                    report += f"   {codon} ({aa_name}): {relative_usage:.1f}% of {aa} codons, {total_freq:.2f}% total\n"
+                report += "\n"
+        
+        # Enhanced summary with additional statistics
+        report += "📈 COMPREHENSIVE SUMMARY\n"
+        report += "─" * 30 + "\n"
+        report += f"🔢 Total codons analyzed: {total_codons:,}\n"
+        report += f"🥇 Most frequent AA: {sorted_aas[0][0]} ({AMINO_ACID_NAMES[sorted_aas[0][0]]}) — {sorted_aas[0][1]:.2f}%\n"
+        report += f"🏁 Least frequent AA: {sorted_aas[-1][0]} ({AMINO_ACID_NAMES[sorted_aas[-1][0]]}) — {sorted_aas[-1][1]:.2f}%\n"
+        
+        # Calculate codon bias metrics
+        max_codon_freq = max(codon_frequencies.values())
+        min_codon_freq = min([f for f in codon_frequencies.values() if f > 0])
+        
+        report += f"📊 Codon frequency range: {min_codon_freq:.3f}% — {max_codon_freq:.2f}%\n"
+        report += f"🎯 Codon usage bias ratio: {max_codon_freq/min_codon_freq:.1f}:1\n"
+        
+        # Count how many codons are actually used
+        used_codons = sum(1 for freq in codon_frequencies.values() if freq > 0)
+        report += f"✅ Codons in use: {used_codons}/64 ({used_codons/64*100:.1f}%)\n"
+        
+        return report
+    
+    def analyze_all_codons(self) -> Dict:
+        """Analyze usage of all 64 codons based on real CDS sequences"""
+        print("🔬 Analyzing comprehensive codon usage...")
+        
+        # Initialize codon counts for all 64 codons
+        all_codon_counts = {codon: 0 for codon in GENETIC_CODE.keys()}
+        
+        # Get CDS features from annotation
+        cds_features = self.annotation_parser.stats.get('cds_features', [])
+        
+        if not cds_features:
+            print("⚠️  No CDS features found in annotation file")
+            print("❌ Cannot perform comprehensive codon analysis without CDS annotations")
+            self.all_codon_counts = all_codon_counts
+            return all_codon_counts
+        
+        # Get genome sequences (as dictionary for quick lookup)
+        sequences = {}
+        for seq_record in self.genome_parser.sequences:
+            sequences[seq_record.id] = str(seq_record.seq).upper()
+        
+        total_codons = 0
+        cds_analyzed = 0
+        
+        for cds in cds_features:
+            seqid = cds['seqid']
+            start = cds['start'] - 1  # Convert to 0-based indexing
+            end = cds['end']
+            strand = cds['strand']
+            
+            if seqid not in sequences:
+                continue
+            
+            # Extract CDS sequence
+            cds_seq = sequences[seqid][start:end]
+            
+            # Handle reverse strand
+            if strand == '-':
+                cds_seq = self._reverse_complement(cds_seq)
+            
+            # Skip if sequence is too short or not divisible by 3
+            if len(cds_seq) < 3 or len(cds_seq) % 3 != 0:
+                continue
+            
+            # Count all codons in this CDS
+            for i in range(0, len(cds_seq) - 2, 3):
+                codon = cds_seq[i:i+3]
+                if codon in all_codon_counts:
+                    all_codon_counts[codon] += 1
+                    total_codons += 1
+            
+            cds_analyzed += 1
+        
+        self.all_codon_counts = all_codon_counts
+        
+        print(f"   📊 Analyzed {cds_analyzed} CDS sequences")
+        print(f"   🔢 Total codons counted: {total_codons:,}")
+        print("✅ Comprehensive codon analysis complete")
+        return all_codon_counts
+
 class ORFAnalyzer:
     """Analyzes Open Reading Frames"""
     
@@ -458,6 +720,39 @@ class ORFAnalyzer:
         self.annotation_parser = annotation_parser
         self.orf_stats = {}
     
+    def _extract_gene_info(self, attributes: str) -> Dict[str, str]:
+        """Extract gene name and product from GFF attributes"""
+        info = {'gene': 'Unknown', 'product': 'Unknown'}
+        
+        # Parse attributes string (format: key=value;key=value;...)
+        for attr in attributes.split(';'):
+            if '=' in attr:
+                key, value = attr.split('=', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                
+                # Clean up values (remove quotes and URL encoding)
+                if value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                value = value.replace('%2C', ',').replace('%3B', ';')
+                
+                # Extract gene names
+                if key in ['gene', 'gene_name', 'name', 'locus_tag']:
+                    if info['gene'] == 'Unknown' or key == 'gene':  # Prefer 'gene' over others
+                        info['gene'] = value
+                # Extract product/function information
+                elif key in ['product', 'note', 'function', 'description']:
+                    if info['product'] == 'Unknown' or key == 'product':  # Prefer 'product' over others
+                        info['product'] = value
+        
+        # If gene is still unknown but we have an ID-like product, use a shorter version
+        if info['gene'] == 'Unknown' and info['product'] != 'Unknown':
+            product_words = info['product'].split()
+            if len(product_words) > 0 and any(c.isdigit() for c in product_words[0]):
+                info['gene'] = product_words[0]  # Use first word if it contains numbers (likely an ID)
+        
+        return info
+
     def analyze_orfs(self) -> Dict:
         """Analyze ORF statistics based on real CDS sequences"""
         print("🔬 Analyzing ORFs...")
@@ -478,13 +773,20 @@ class ORFAnalyzer:
             }
             return self.orf_stats
         
-        # Calculate ORF lengths from CDS features
-        orf_lengths = []
+        # Calculate ORF lengths from CDS features and track longest/shortest
+        orf_data = []
         for cds in cds_features:
             length = cds['end'] - cds['start'] + 1
-            orf_lengths.append(length)
+            gene_info = self._extract_gene_info(cds.get('attributes', ''))
+            orf_data.append({
+                'length': length,
+                'gene': gene_info['gene'],
+                'product': gene_info['product'],
+                'start': cds['start'],
+                'end': cds['end']
+            })
         
-        if not orf_lengths:
+        if not orf_data:
             print("⚠️  No valid ORF lengths found")
             print("❌ Cannot calculate ORF statistics")
             # Return empty stats instead of mock data
@@ -497,15 +799,22 @@ class ORFAnalyzer:
             }
             return self.orf_stats
         
+        # Find longest and shortest ORFs
+        longest_orf = max(orf_data, key=lambda x: x['length'])
+        shortest_orf = min(orf_data, key=lambda x: x['length'])
+        
         # Calculate statistics
         import statistics
+        orf_lengths = [orf['length'] for orf in orf_data]
         
         self.orf_stats = {
             'total_orfs': len(orf_lengths),
             'mean_length': round(statistics.mean(orf_lengths), 1),
             'median_length': statistics.median(orf_lengths),
             'longest_orf': max(orf_lengths),
-            'shortest_orf': min(orf_lengths)
+            'shortest_orf': min(orf_lengths),
+            'longest_orf_info': longest_orf,
+            'shortest_orf_info': shortest_orf
         }
         
         print(f"   � Analyzed {len(orf_lengths)} ORFs")
@@ -586,9 +895,32 @@ class ReportGenerator:
 📏 ORF Statistics:
 - Total ORFs: {orf_stats['total_orfs']:,}
 - Mean length: {orf_stats['mean_length']:.1f} bp
-- Median length: {orf_stats['median_length']} bp
-- Longest ORF: {orf_stats['longest_orf']:,} bp
-- Shortest ORF: {orf_stats['shortest_orf']} bp
+- Median length: {orf_stats['median_length']} bp"""
+        
+        # Add detailed info for longest and shortest ORFs if available
+        if 'longest_orf_info' in orf_stats and orf_stats['longest_orf_info']:
+            longest_info = orf_stats['longest_orf_info']
+            gene_name = longest_info.get('gene', 'Unknown')
+            product = longest_info.get('product', 'Unknown')
+            summary += f"\n- Longest ORF: {orf_stats['longest_orf']:,} bp"
+            summary += f"\n  📍 Gene: {gene_name}"
+            if product != 'Unknown' and product != gene_name:
+                summary += f"\n  🔬 Product: {product}"
+        else:
+            summary += f"\n- Longest ORF: {orf_stats['longest_orf']:,} bp"
+        
+        if 'shortest_orf_info' in orf_stats and orf_stats['shortest_orf_info']:
+            shortest_info = orf_stats['shortest_orf_info']
+            gene_name = shortest_info.get('gene', 'Unknown')
+            product = shortest_info.get('product', 'Unknown')
+            summary += f"\n- Shortest ORF: {orf_stats['shortest_orf']} bp"
+            summary += f"\n  📍 Gene: {gene_name}"
+            if product != 'Unknown' and product != gene_name:
+                summary += f"\n  🔬 Product: {product}"
+        else:
+            summary += f"\n- Shortest ORF: {orf_stats['shortest_orf']} bp"
+        
+        summary += f"""
 
 🍽️ Nom nom nom! Analysis complete.
 """
@@ -632,10 +964,12 @@ Examples:
   # Analyze local files
   python genomnomnom.py --genome genome.fasta --annotation genes.gff
   python genomnomnom.py --genome genome.fasta --annotation genes.gff --output results.csv
+  python genomnomnom.py --genome genome.fasta --annotation genes.gff --detailed-codons
   
   # Search and download from NCBI
   python genomnomnom.py --species "Escherichia coli" --email your.email@example.com
   python genomnomnom.py --species "Homo sapiens" --email your.email@example.com --output human_results.csv
+  python genomnomnom.py --species "Escherichia coli" --email your.email@example.com --detailed-codons
         """
     )
     
@@ -671,6 +1005,12 @@ Examples:
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose output"
+    )
+    
+    parser.add_argument(
+        "--detailed-codons", "-d",
+        action="store_true",
+        help="Show detailed codon usage table with all 64 codons"
     )
     
     args = parser.parse_args()
@@ -732,6 +1072,11 @@ Examples:
         summary = report_generator.generate_summary(genome_stats, codon_stats, orf_stats)
         
         print(summary)
+        
+        # Show detailed codon table if requested
+        if args.detailed_codons:
+            codon_table = codon_analyzer.generate_codon_table_report()
+            print(codon_table)
         
         # Save CSV if requested
         if args.output:
