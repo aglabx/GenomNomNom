@@ -23,27 +23,7 @@ from urllib.parse import quote
 import gzip
 import shutil
 
-# Mock data for demonstration
-MOCK_CODON_COUNTS = {
-    'start_codons': {
-        'ATG': 3847,
-        'GTG': 152,
-        'TTG': 24
-    },
-    'stop_codons': {
-        'TAA': 1834,
-        'TAG': 289,
-        'TGA': 1900
-    }
-}
-
-MOCK_ORF_STATS = {
-    'total_orfs': 4023,
-    'mean_length': 924.3,
-    'median_length': 678,
-    'longest_orf': 4932,
-    'shortest_orf': 96
-}
+# Note: Mock data removed - now using real analysis only
 
 class NCBISearcher:
     """Handles searching and downloading genomes from NCBI"""
@@ -365,16 +345,81 @@ class CodonAnalyzer:
         self.genome_parser = genome_parser
         self.annotation_parser = annotation_parser
         self.codon_counts = {}
+        self.start_codons = ['ATG', 'GTG', 'TTG']
+        self.stop_codons = ['TAA', 'TAG', 'TGA']
     
     def count_codons(self) -> Dict:
-        """Count start and stop codons (MOCK implementation)"""
+        """Count start and stop codons based on real CDS sequences"""
         print("🔬 Analyzing codon usage...")
         
-        # Mock implementation
-        self.codon_counts = MOCK_CODON_COUNTS
+        start_counts = {codon: 0 for codon in self.start_codons}
+        stop_counts = {codon: 0 for codon in self.stop_codons}
         
+        # Get CDS features from annotation
+        cds_features = self.annotation_parser.stats.get('cds_features', [])
+        
+        if not cds_features:
+            print("⚠️  No CDS features found in annotation file")
+            print("❌ Cannot perform codon analysis without CDS annotations")
+            # Return empty counts instead of mock data
+            self.codon_counts = {
+                'start_codons': {'ATG': 0, 'GTG': 0, 'TTG': 0},
+                'stop_codons': {'TAA': 0, 'TAG': 0, 'TGA': 0}
+            }
+            return self.codon_counts
+        
+        # Get genome sequences (as dictionary for quick lookup)
+        sequences = {}
+        for seq_record in self.genome_parser.sequences:
+            sequences[seq_record.id] = str(seq_record.seq).upper()
+        
+        cds_analyzed = 0
+        for cds in cds_features:
+            seqid = cds['seqid']
+            start = cds['start'] - 1  # Convert to 0-based indexing
+            end = cds['end']
+            strand = cds['strand']
+            
+            if seqid not in sequences:
+                continue
+            
+            # Extract CDS sequence
+            cds_seq = sequences[seqid][start:end]
+            
+            # Handle reverse strand
+            if strand == '-':
+                cds_seq = self._reverse_complement(cds_seq)
+            
+            # Skip if sequence is too short
+            if len(cds_seq) < 6:  # Need at least start + stop codon
+                continue
+            
+            # Count start codon (first 3 bases)
+            start_codon = cds_seq[:3]
+            if start_codon in start_counts:
+                start_counts[start_codon] += 1
+            
+            # Count stop codon (last 3 bases)
+            if len(cds_seq) >= 3:
+                stop_codon = cds_seq[-3:]
+                if stop_codon in stop_counts:
+                    stop_counts[stop_codon] += 1
+            
+            cds_analyzed += 1
+        
+        self.codon_counts = {
+            'start_codons': start_counts,
+            'stop_codons': stop_counts
+        }
+        
+        print(f"   📊 Analyzed {cds_analyzed} CDS sequences")
         print("✅ Codon analysis complete")
         return self.codon_counts
+    
+    def _reverse_complement(self, seq: str) -> str:
+        """Calculate reverse complement of DNA sequence"""
+        complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+        return ''.join(complement.get(base, base) for base in reversed(seq))
     
     def calculate_percentages(self) -> Dict:
         """Calculate codon usage percentages"""
@@ -385,17 +430,23 @@ class CodonAnalyzer:
         
         # Calculate start codon percentages
         total_start = sum(self.codon_counts['start_codons'].values())
-        results['start_percentages'] = {
-            codon: (count / total_start) * 100 
-            for codon, count in self.codon_counts['start_codons'].items()
-        }
+        if total_start > 0:
+            results['start_percentages'] = {
+                codon: (count / total_start) * 100 
+                for codon, count in self.codon_counts['start_codons'].items()
+            }
+        else:
+            results['start_percentages'] = {codon: 0 for codon in self.start_codons}
         
         # Calculate stop codon percentages
         total_stop = sum(self.codon_counts['stop_codons'].values())
-        results['stop_percentages'] = {
-            codon: (count / total_stop) * 100 
-            for codon, count in self.codon_counts['stop_codons'].items()
-        }
+        if total_stop > 0:
+            results['stop_percentages'] = {
+                codon: (count / total_stop) * 100 
+                for codon, count in self.codon_counts['stop_codons'].items()
+            }
+        else:
+            results['stop_percentages'] = {codon: 0 for codon in self.stop_codons}
         
         return results
 
@@ -408,14 +459,97 @@ class ORFAnalyzer:
         self.orf_stats = {}
     
     def analyze_orfs(self) -> Dict:
-        """Analyze ORF statistics (MOCK implementation)"""
+        """Analyze ORF statistics based on real CDS sequences"""
         print("🔬 Analyzing ORFs...")
         
-        # Mock implementation
-        self.orf_stats = MOCK_ORF_STATS
+        # Get CDS features from annotation
+        cds_features = self.annotation_parser.stats.get('cds_features', [])
         
+        if not cds_features:
+            print("⚠️  No CDS features found in annotation file")
+            print("❌ Cannot perform ORF analysis without CDS annotations")
+            # Return empty stats instead of mock data
+            self.orf_stats = {
+                'total_orfs': 0,
+                'mean_length': 0,
+                'median_length': 0,
+                'longest_orf': 0,
+                'shortest_orf': 0
+            }
+            return self.orf_stats
+        
+        # Calculate ORF lengths from CDS features
+        orf_lengths = []
+        for cds in cds_features:
+            length = cds['end'] - cds['start'] + 1
+            orf_lengths.append(length)
+        
+        if not orf_lengths:
+            print("⚠️  No valid ORF lengths found")
+            print("❌ Cannot calculate ORF statistics")
+            # Return empty stats instead of mock data
+            self.orf_stats = {
+                'total_orfs': 0,
+                'mean_length': 0,
+                'median_length': 0,
+                'longest_orf': 0,
+                'shortest_orf': 0
+            }
+            return self.orf_stats
+        
+        # Calculate statistics
+        import statistics
+        
+        self.orf_stats = {
+            'total_orfs': len(orf_lengths),
+            'mean_length': round(statistics.mean(orf_lengths), 1),
+            'median_length': statistics.median(orf_lengths),
+            'longest_orf': max(orf_lengths),
+            'shortest_orf': min(orf_lengths)
+        }
+        
+        print(f"   � Analyzed {len(orf_lengths)} ORFs")
+        print(f"   📏 Length range: {min(orf_lengths)} - {max(orf_lengths)} bp")
         print("✅ ORF analysis complete")
         return self.orf_stats
+    
+    def find_orfs_in_sequence(self, sequence: str, min_length: int = 100) -> List[Dict]:
+        """Find ORFs in a DNA sequence (alternative method for annotation-free analysis)"""
+        orfs = []
+        start_codons = ['ATG', 'GTG', 'TTG']
+        stop_codons = ['TAA', 'TAG', 'TGA']
+        
+        # Check all three reading frames
+        for frame in range(3):
+            i = frame
+            while i < len(sequence) - 2:
+                # Look for start codon
+                codon = sequence[i:i+3]
+                if codon in start_codons:
+                    start_pos = i
+                    # Look for stop codon
+                    for j in range(i + 3, len(sequence) - 2, 3):
+                        stop_codon = sequence[j:j+3]
+                        if stop_codon in stop_codons:
+                            orf_length = j + 3 - start_pos
+                            if orf_length >= min_length:
+                                orfs.append({
+                                    'start': start_pos,
+                                    'end': j + 3,
+                                    'length': orf_length,
+                                    'frame': frame + 1,
+                                    'start_codon': codon,
+                                    'stop_codon': stop_codon
+                                })
+                            i = j + 3
+                            break
+                    else:
+                        # No stop codon found, move to next position
+                        i += 3
+                else:
+                    i += 3
+        
+        return orfs
 
 class ReportGenerator:
     """Generates output reports"""
