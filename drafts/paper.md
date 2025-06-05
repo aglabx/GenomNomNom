@@ -59,7 +59,7 @@ Our initial statistics will provide a baseline for exploring codon‑usage evolu
 
 ## 6 Availability and Requirements
 
-* **Project home page**: [https://github.com/yourusername/GenomNomNom](https://github.com/yourusername/GenomNomNom)
+* **Project home page**: [https://github.com/yourusername/GenomNomNom](https://github.com/aglabx/GenomNomNom)
 * **Operating system**: Platform‑independent
 * **Programming language**: Python ≥3.10
 * **License**: MIT
