@@ -4,6 +4,7 @@
 
 This is the main entry point for the GenomNomNom toolkit.
 Phase 1: Real FASTA and GFF parsing implementation.
+Phase 2: NCBI genome search and download functionality.
 """
 
 import argparse
@@ -14,6 +15,13 @@ from Bio import SeqIO
 from Bio.SeqUtils import gc_fraction
 import re
 import csv
+import requests
+import json
+import time
+import os
+from urllib.parse import quote
+import gzip
+import shutil
 
 # Mock data for demonstration
 MOCK_CODON_COUNTS = {
@@ -36,6 +44,180 @@ MOCK_ORF_STATS = {
     'longest_orf': 4932,
     'shortest_orf': 96
 }
+
+class NCBISearcher:
+    """Handles searching and downloading genomes from NCBI"""
+    
+    def __init__(self, email: str = "your.email@example.com"):
+        self.email = email
+        self.base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+        self.ftp_base = "https://ftp.ncbi.nlm.nih.gov/genomes/all"
+        
+    def search_genomes(self, species_name: str, max_results: int = 10) -> List[Dict]:
+        """Search for reference genomes by species name"""
+        print(f"🔍 Searching NCBI for '{species_name}' genomes...")
+        
+        # Search for assembly records
+        search_term = f'"{species_name}"[Organism] AND "reference genome"[RefSeq Category]'
+        
+        try:
+            # Step 1: Search assembly database
+            search_url = f"{self.base_url}/esearch.fcgi"
+            search_params = {
+                'db': 'assembly',
+                'term': search_term,
+                'retmax': max_results,
+                'retmode': 'json',
+                'email': self.email
+            }
+            
+            response = requests.get(search_url, params=search_params)
+            response.raise_for_status()
+            search_results = response.json()
+            
+            if not search_results.get('esearchresult', {}).get('idlist'):
+                print(f"❌ No reference genomes found for '{species_name}'")
+                return []
+            
+            # Step 2: Get assembly details
+            assembly_ids = search_results['esearchresult']['idlist']
+            summary_url = f"{self.base_url}/esummary.fcgi"
+            summary_params = {
+                'db': 'assembly',
+                'id': ','.join(assembly_ids),
+                'retmode': 'json',
+                'email': self.email
+            }
+            
+            response = requests.get(summary_url, params=summary_params)
+            response.raise_for_status()
+            summary_results = response.json()
+            
+            # Parse assembly information
+            assemblies = []
+            for assembly_id in assembly_ids:
+                if assembly_id in summary_results['result']:
+                    assembly_info = summary_results['result'][assembly_id]
+                    assemblies.append({
+                        'id': assembly_id,
+                        'accession': assembly_info.get('assemblyaccession', 'N/A'),
+                        'name': assembly_info.get('assemblyname', 'N/A'),
+                        'organism': assembly_info.get('organism', 'N/A'),
+                        'level': assembly_info.get('assemblylevel', 'N/A'),
+                        'size': assembly_info.get('totalsize', 0),
+                        'submission_date': assembly_info.get('submissiondate', 'N/A'),
+                        'ftp_path': assembly_info.get('ftppath_refseq', assembly_info.get('ftppath_genbank', ''))
+                    })
+            
+            print(f"✅ Found {len(assemblies)} reference genome(s)")
+            return assemblies
+            
+        except requests.RequestException as e:
+            print(f"❌ Error searching NCBI: {e}")
+            return []
+        except Exception as e:
+            print(f"❌ Unexpected error: {e}")
+            return []
+    
+    def download_genome_files(self, assembly_info: Dict, output_dir: str = "downloads") -> Tuple[Optional[str], Optional[str]]:
+        """Download FASTA and GFF files for a specific assembly"""
+        if not assembly_info.get('ftp_path'):
+            print("❌ No FTP path available for this assembly")
+            return None, None
+        
+        output_path = Path(output_dir)
+        output_path.mkdir(exist_ok=True)
+        
+        accession = assembly_info['accession']
+        ftp_base = assembly_info['ftp_path'].replace('ftp://', 'https://')
+        
+        # Construct file URLs
+        base_name = ftp_base.split('/')[-1]
+        fasta_url = f"{ftp_base}/{base_name}_genomic.fna.gz"
+        gff_url = f"{ftp_base}/{base_name}_genomic.gff.gz"
+        
+        fasta_file = None
+        gff_file = None
+        
+        try:
+            # Download FASTA file
+            print(f"📥 Downloading FASTA file...")
+            fasta_file = self._download_and_extract(fasta_url, output_path, f"{accession}_genomic.fna")
+            
+            # Download GFF file
+            print(f"📥 Downloading GFF file...")
+            gff_file = self._download_and_extract(gff_url, output_path, f"{accession}_genomic.gff")
+            
+            print("✅ Files downloaded successfully!")
+            return fasta_file, gff_file
+            
+        except Exception as e:
+            print(f"❌ Error downloading files: {e}")
+            return None, None
+    
+    def _download_and_extract(self, url: str, output_dir: Path, filename: str) -> str:
+        """Download and extract a gzipped file"""
+        compressed_file = output_dir / f"{filename}.gz"
+        extracted_file = output_dir / filename
+        
+        # Download compressed file
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        with open(compressed_file, 'wb') as f:
+            shutil.copyfileobj(response.raw, f)
+        
+        # Extract file
+        with gzip.open(compressed_file, 'rb') as f_in:
+            with open(extracted_file, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Remove compressed file
+        compressed_file.unlink()
+        
+        return str(extracted_file)
+    
+    def interactive_genome_selection(self, species_name: str) -> Tuple[Optional[str], Optional[str]]:
+        """Interactive workflow for selecting and downloading a genome"""
+        assemblies = self.search_genomes(species_name)
+        
+        if not assemblies:
+            return None, None
+        
+        print("\n📋 Available reference genomes:")
+        print("-" * 80)
+        for i, assembly in enumerate(assemblies, 1):
+            size_mb = int(assembly['size']) / 1_000_000 if assembly['size'] else 0
+            print(f"{i:2d}. {assembly['organism']}")
+            print(f"    Accession: {assembly['accession']}")
+            print(f"    Name: {assembly['name']}")
+            print(f"    Level: {assembly['level']}")
+            print(f"    Size: {size_mb:.1f} MB")
+            print(f"    Date: {assembly['submission_date']}")
+            print()
+        
+        # User selection
+        while True:
+            try:
+                choice = input(f"Select genome (1-{len(assemblies)}) or 'q' to quit: ").strip()
+                if choice.lower() == 'q':
+                    return None, None
+                
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(assemblies):
+                    selected_assembly = assemblies[choice_idx]
+                    print(f"\n✅ Selected: {selected_assembly['organism']} ({selected_assembly['accession']})")
+                    
+                    # Download files
+                    fasta_file, gff_file = self.download_genome_files(selected_assembly)
+                    return fasta_file, gff_file
+                else:
+                    print("❌ Invalid selection. Please try again.")
+            except ValueError:
+                print("❌ Please enter a number or 'q' to quit.")
+            except KeyboardInterrupt:
+                print("\n👋 Cancelled by user")
+                return None, None
 
 class GenomeParser:
     """Handles parsing of FASTA genome files"""
@@ -313,23 +495,39 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Analyze local files
   python genomnomnom.py --genome genome.fasta --annotation genes.gff
   python genomnomnom.py --genome genome.fasta --annotation genes.gff --output results.csv
+  
+  # Search and download from NCBI
+  python genomnomnom.py --species "Escherichia coli" --email your.email@example.com
+  python genomnomnom.py --species "Homo sapiens" --email your.email@example.com --output human_results.csv
         """
     )
     
+    # Local file analysis arguments
     parser.add_argument(
         "--genome", "-g",
-        required=True,
         help="Path to genome FASTA file"
     )
     
     parser.add_argument(
         "--annotation", "-a", 
-        required=True,
-        help="Path to gene annotation file (GFF format)"
+        help="Path to gene annotation file (GFF format) - required for local mode"
     )
     
+    # NCBI search arguments
+    parser.add_argument(
+        "--species", "-s",
+        help="Species name to search for (e.g., 'Escherichia coli')"
+    )
+    
+    parser.add_argument(
+        "--email", "-e",
+        help="Email address for NCBI API (required for species search)"
+    )
+    
+    # Common arguments
     parser.add_argument(
         "--output", "-o",
         help="Output CSV file path (optional)"
@@ -343,16 +541,48 @@ Examples:
     
     args = parser.parse_args()
     
+    # Validate arguments based on mode
+    if args.genome and not args.annotation:
+        parser.error("--annotation is required when using --genome")
+    
+    if args.species and not args.email:
+        parser.error("--email is required when using --species")
+    
+    if not args.genome and not args.species:
+        parser.error("Either --genome or --species must be specified")
+    
+    if args.genome and args.species:
+        parser.error("Cannot specify both --genome and --species. Choose one mode.")
+    
     try:
         print("🧬 Starting GenomNomNom analysis...")
         print("=" * 40)
         
+        genome_file = args.genome
+        annotation_file = args.annotation
+        
+        # NCBI search and download mode
+        if args.species:
+            print(f"🔍 NCBI mode: searching for '{args.species}'")
+            
+            ncbi_searcher = NCBISearcher(email=args.email)
+            genome_file, annotation_file = ncbi_searcher.interactive_genome_selection(args.species)
+            
+            if not genome_file or not annotation_file:
+                print("❌ No genome selected or download failed. Exiting.")
+                sys.exit(1)
+            
+            print(f"📁 Using downloaded files:")
+            print(f"   Genome: {genome_file}")
+            print(f"   Annotation: {annotation_file}")
+            print()
+        
         # Parse genome
-        genome_parser = GenomeParser(args.genome)
+        genome_parser = GenomeParser(genome_file)
         genome_stats = genome_parser.parse()
         
-        # Parse annotations
-        annotation_parser = AnnotationParser(args.annotation)
+        # Parse annotations  
+        annotation_parser = AnnotationParser(annotation_file)
         annotation_stats = annotation_parser.parse()
         
         # Analyze codons

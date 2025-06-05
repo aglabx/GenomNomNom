@@ -2,19 +2,58 @@
 
 ## 🚀 Quick Start
 
-### 1. Basic Analysis
+### 1. Local File Analysis
 ```bash
 python genomnomnom.py --genome test_data/genome_sample.fasta --annotation test_data/annotation_sample.gff
 ```
 
-Expected output:
+### 2. NCBI Genome Search and Download
+```bash
+python genomnomnom.py --species "Mycoplasma genitalium" --email your.email@example.com
+```
+
+Expected interactive output:
+```
+🧬 Starting GenomNomNom analysis...
+========================================
+🔍 NCBI mode: searching for 'Mycoplasma genitalium'
+🔍 Searching NCBI for 'Mycoplasma genitalium' genomes...
+✅ Found 1 reference genome(s)
+
+📋 Available reference genomes:
+--------------------------------------------------------------------------------
+ 1. Mycoplasmoides genitalium (bacteria)
+    Accession: GCF_040556925.1
+    Name: ASM4055692v1
+    Level: N/A
+    Size: 0.6 MB
+    Date: 2024/10/16
+
+Select genome (1-1) or 'q' to quit: 1
+
+✅ Selected: Mycoplasmoides genitalium (bacteria) (GCF_040556925.1)
+📥 Downloading FASTA file...
+📥 Downloading GFF file...
+✅ Files downloaded successfully!
+📁 Using downloaded files:
+   Genome: downloads/GCF_040556925.1_genomic.fna
+   Annotation: downloads/GCF_040556925.1_genomic.gff
+
+🔍 Parsing genome file: downloads/GCF_040556925.1_genomic.fna
+✅ Genome parsed successfully
+   📊 Found 1 sequence(s)
+   📏 Total length: 580,076 bp
+   🧬 GC content: 31.7%
+```
+
+### 3. Local Analysis - Expected Output
 ```
 🧬 GenomNomNom Analysis Report
 =====================================
 
 📊 Genome Statistics:
-- Total length: 4,641,652 bp
-- GC content: 50.8%
+- Total length: 623 bp
+- GC content: 48.3%
 - Number of contigs: 1
 
 🚀 Start Codon Usage:
@@ -37,7 +76,7 @@ Expected output:
 🍽️ Nom nom nom! Analysis complete.
 ```
 
-### 2. Save Results to CSV
+### 4. Save Results to CSV
 ```bash
 python genomnomnom.py --genome test_data/genome_sample.fasta --annotation test_data/annotation_sample.gff --output my_results.csv
 ```
@@ -57,6 +96,82 @@ orf_stats,median_length,678.0
 orf_stats,longest_orf,4932.0
 orf_stats,shortest_orf,96.0
 ```
+
+## 🌐 NCBI Integration Examples
+
+### 1. Search for Bacterial Genomes
+```bash
+# Mycoplasma - one of the smallest bacterial genomes
+python genomnomnom.py --species "Mycoplasma genitalium" --email your.email@example.com
+
+# E. coli - model organism with well-annotated genome
+python genomnomnom.py --species "Escherichia coli" --email your.email@example.com
+
+# Bacillus subtilis - another model bacterium
+python genomnomnom.py --species "Bacillus subtilis" --email your.email@example.com
+```
+
+### 2. Search for Eukaryotic Genomes
+```bash
+# Human reference genome (warning: very large!)
+python genomnomnom.py --species "Homo sapiens" --email your.email@example.com
+
+# Model organism yeast
+python genomnomnom.py --species "Saccharomyces cerevisiae" --email your.email@example.com
+
+# Fruit fly
+python genomnomnom.py --species "Drosophila melanogaster" --email your.email@example.com
+```
+
+### 3. Save NCBI Results to CSV
+```bash
+python genomnomnom.py --species "Mycoplasma genitalium" --email your.email@example.com --output myco_analysis.csv
+```
+
+### 4. Test NCBI Functionality (Non-interactive)
+```bash
+python test_ncbi.py
+```
+
+Expected output:
+```
+🧪 Testing NCBI search functionality...
+🔍 Searching for 'Mycoplasma genitalium'...
+🔍 Searching NCBI for 'Mycoplasma genitalium' genomes...
+✅ Found 1 reference genome(s)
+✅ Found 1 assemblies
+
+📋 Available assemblies:
+ 1. Mycoplasmoides genitalium (bacteria)
+    Accession: GCF_040556925.1
+    Name: ASM4055692v1
+    Level: N/A
+    Size: 0.6 MB
+
+🔬 Testing download URLs construction...
+   FASTA URL: https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/040/556/925/GCF_040556925.1_ASM4055692v1/GCF_040556925.1_ASM4055692v1_genomic.fna.gz
+   GFF URL: https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/040/556/925/GCF_040556925.1_ASM4055692v1/GCF_040556925.1_ASM4055692v1_genomic.gff.gz
+   FASTA file exists: True
+   GFF file exists: True
+✅ NCBI search test completed successfully!
+```
+
+### 5. NCBI Search Tips
+
+**Good species for testing:**
+- `"Mycoplasma genitalium"` - Very small genome (~580 kb)
+- `"Escherichia coli"` - Standard model organism (~4.6 Mb)
+- `"Bacillus subtilis"` - Gram-positive model (~4.2 Mb)
+
+**Email requirement:**
+- NCBI requires an email address for API access
+- Use your real email address
+- This helps NCBI contact you if there are issues with your queries
+
+**Downloaded files location:**
+- Files are saved in the `downloads/` directory
+- FASTA files: `{accession}_genomic.fna`
+- GFF files: `{accession}_genomic.gff`
 
 ### 3. Verbose Mode
 ```bash

@@ -3,3 +3,5 @@ numpy>=1.21.0
 biopython>=1.78
 argparse
 bcbio-gff>=0.6.6
+requests>=2.25.1
+urllib3>=1.26.0
